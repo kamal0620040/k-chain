@@ -2,11 +2,17 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 
-export const SecretRecoveryPhrase = () => {
+export const SecretRecoveryPhrase = ({
+  handleSetMnemonic,
+}: {
+  handleSetMnemonic: (mnemonic: string) => void;
+}) => {
   const [secretRecoveryPhrase, setSecretRecoveryPhrase] = useState("");
 
   const handleGenerateSecretRecoveryPhrase = () => {
-    console.log("Generate secret recovery phrase");
+    if (secretRecoveryPhrase === "") {
+      handleSetMnemonic("test");
+    }
   };
 
   return (
