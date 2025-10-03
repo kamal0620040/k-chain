@@ -1,6 +1,12 @@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
+import { generateMnemonic, validateMnemonic } from "bip39";
+import { Buffer } from "buffer";
+import { toast } from "sonner";
+
+// Make Buffer available globally for bip39
+window.Buffer = Buffer;
 
 export const SecretRecoveryPhrase = ({
   handleSetMnemonic,
@@ -11,7 +17,19 @@ export const SecretRecoveryPhrase = ({
 
   const handleGenerateSecretRecoveryPhrase = () => {
     if (secretRecoveryPhrase === "") {
-      handleSetMnemonic("test");
+      const mnemonic = generateMnemonic();
+      console.log(mnemonic);
+      toast.success("Secret recovery phrase generated successfully!");
+      handleSetMnemonic(mnemonic);
+    } else {
+      if (validateMnemonic(secretRecoveryPhrase)) {
+        toast.success("Secret recovery phrase validated successfully!");
+        handleSetMnemonic(secretRecoveryPhrase);
+      } else {
+        toast.error(
+          "Invalid secret recovery phrase. Please check and try again."
+        );
+      }
     }
   };
 

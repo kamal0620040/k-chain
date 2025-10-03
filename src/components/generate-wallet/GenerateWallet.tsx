@@ -8,14 +8,32 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Copy, EyeOff, Trash } from "lucide-react";
+import { Copy, Eye, EyeOff, Trash } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { mnemonicToSeedSync } from "bip39";
+import { derivePath } from "ed25519-hd-key";
+import nacl from "tweetnacl";
+import { Keypair } from "@solana/web3.js";
+import bs58 from "bs58";
+import { ethers } from "ethers";
+import { toast } from "sonner";
+
+interface Wallet {
+  publicKey: string;
+  privateKey: string;
+  mnemonic: string;
+  path: string;
+}
 
 export const GenerateWallet = () => {
   const [selectedBlockchain, setSelectedBlockchain] = useState<
     BlockchainType | ""
   >("");
   const [mnemonic, setMnemonic] = useState<string>("");
+  const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [visiblePrivateKeys, setVisiblePrivateKeys] = useState<{
+    [key: number]: boolean;
+  }>({});
 
   const handleSelectBlockchain = (blockchain: BlockchainType) => {
     setSelectedBlockchain(blockchain);
@@ -23,6 +41,97 @@ export const GenerateWallet = () => {
 
   const handleSetMnemonic = (mnemonic: string) => {
     setMnemonic(mnemonic);
+  };
+
+  const generateWalletFromMnemonic = (
+    pathType: string,
+    mnemonic: string,
+    accountIndex: number
+  ): Wallet | null => {
+    try {
+      const seedBuffer = mnemonicToSeedSync(mnemonic);
+      const path = `m/44'/${pathType}'/0'/${accountIndex}'`;
+      const { key: derivedSeed } = derivePath(path, seedBuffer.toString("hex"));
+
+      let publicKeyEncoded: string;
+      let privateKeyEncoded: string;
+
+      if (pathType === "501") {
+        // Solana
+        const { secretKey } = nacl.sign.keyPair.fromSeed(derivedSeed);
+        const keypair = Keypair.fromSecretKey(secretKey);
+
+        privateKeyEncoded = bs58.encode(secretKey);
+        publicKeyEncoded = keypair.publicKey.toBase58();
+      } else if (pathType === "60") {
+        // Ethereum
+        const privateKey = Buffer.from(derivedSeed).toString("hex");
+        privateKeyEncoded = privateKey;
+
+        const wallet = new ethers.Wallet(privateKey);
+        publicKeyEncoded = wallet.address;
+      } else {
+        toast.error("Unsupported path type.");
+        return null;
+      }
+
+      return {
+        publicKey: publicKeyEncoded,
+        privateKey: privateKeyEncoded,
+        mnemonic,
+        path,
+      };
+    } catch (error) {
+      console.error("Wallet generation error:", error);
+      toast.error("Failed to generate wallet. Please try again.");
+      return null;
+    }
+  };
+
+  const handleAddWallet = () => {
+    const pathType = selectedBlockchain === "solana" ? "501" : "60";
+    const newWallet = generateWalletFromMnemonic(
+      pathType,
+      mnemonic,
+      wallets.length
+    );
+
+    if (newWallet) {
+      setWallets([...wallets, newWallet]);
+      toast.success("Wallet added successfully!");
+    }
+  };
+
+  const handleRemoveWallet = (index: number) => {
+    const newWallets = wallets.filter((_, i) => i !== index);
+    setWallets(newWallets);
+    const newVisibleKeys = { ...visiblePrivateKeys };
+    delete newVisibleKeys[index];
+    setVisiblePrivateKeys(newVisibleKeys);
+    toast.success("Wallet removed successfully!");
+  };
+
+  const handleRemoveAllWallets = () => {
+    setWallets([]);
+    setVisiblePrivateKeys({});
+    toast.success("All wallets removed successfully!");
+  };
+
+  const togglePrivateKeyVisibility = (index: number) => {
+    setVisiblePrivateKeys({
+      ...visiblePrivateKeys,
+      [index]: !visiblePrivateKeys[index],
+    });
+  };
+
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} copied to clipboard!`);
+    } catch (error) {
+      console.error("Clipboard error:", error);
+      toast.error("Failed to copy to clipboard");
+    }
   };
 
   if (selectedBlockchain === "") {
@@ -48,12 +157,13 @@ export const GenerateWallet = () => {
             </AccordionTrigger>
             <AccordionContent className="px-8">
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 justify-center w-full items-center mx-auto my-8">
-                {Array.from({ length: 12 }).map((_, index) => (
+                {mnemonic?.split(" ")?.map((word, index) => (
                   <p
-                    key={index}
-                    className="md:text-lg bg-foreground/5 hover:bg-foreground/10 transition-all duration-300 rounded-lg p-4"
+                    key={`${word}-${index}`}
+                    onClick={() => copyToClipboard(mnemonic, "Secret phrase")}
+                    className="md:text-lg bg-foreground/5 hover:bg-foreground/10 transition-all duration-300 rounded-lg p-4 cursor-pointer"
                   >
-                    {index}
+                    {word}
                   </p>
                 ))}
               </div>
@@ -71,49 +181,93 @@ export const GenerateWallet = () => {
             {selectedBlockchain.toUpperCase()} Wallet
           </div>
           <div className="flex gap-2">
-            <Button>Add Wallet</Button>
-            <Button className="bg-red-700 text-white">Remove Wallet</Button>
+            <Button onClick={handleAddWallet}>Add Wallet</Button>
+            <Button
+              className="bg-red-700 text-white hover:bg-red-800"
+              onClick={handleRemoveAllWallets}
+              disabled={wallets.length === 0}
+            >
+              Remove All Wallets
+            </Button>
           </div>
         </div>
 
-        <div className="mt-10">
-          <div className="flex flex-col rounded-2xl border border-primary/10">
-            <div className="flex justify-between px-8 py-6">
-              <h3 className="font-bold text-xl md:text-2xl tracking-tighter ">
-                Wallet
-              </h3>
-
-              <Button variant="ghost" className="flex gap-2 items-center">
-                <Trash className="size-4 text-destructive" />
-              </Button>
+        <div className="mt-10 flex flex-col gap-6">
+          {wallets.length === 0 ? (
+            <div className="text-center py-12 text-primary/50">
+              <p className="text-lg">
+                No wallets yet. Click "Add Wallet" to create one.
+              </p>
             </div>
-            <div className="flex flex-col gap-8 px-8 py-4 rounded-2xl bg-secondary/50">
-              <div className="flex flex-col w-full gap-2" onClick={() => {}}>
-                <span className="text-lg md:text-xl font-bold tracking-tighter">
-                  Public Key
-                </span>
-                <p className="text-primary/80 font-medium cursor-pointer hover:text-primary transition-all duration-300 truncate">
-                  {"publicKey"}
-                </p>
-              </div>
-              <div className="flex flex-col w-full gap-2">
-                <span className="text-lg md:text-xl font-bold tracking-tighter">
-                  Private Key
-                </span>
-                <div className="flex justify-between w-full items-center gap-2">
-                  <p
-                    onClick={() => {}}
-                    className="text-primary/80 font-medium cursor-pointer hover:text-primary transition-all duration-300 truncate"
+          ) : (
+            wallets.map((wallet, index) => (
+              <div
+                key={index}
+                className="flex flex-col rounded-2xl border border-primary/10"
+              >
+                <div className="flex justify-between px-8 py-6">
+                  <h3 className="font-bold text-xl md:text-2xl tracking-tighter">
+                    Wallet {index + 1}
+                  </h3>
+
+                  <Button
+                    variant="ghost"
+                    className="flex gap-2 items-center"
+                    onClick={() => handleRemoveWallet(index)}
                   >
-                    {"•".repeat(12)}
-                  </p>
-                  <Button variant="ghost" onClick={() => {}}>
-                    <EyeOff className="size-4" />
+                    <Trash className="size-4 text-destructive" />
                   </Button>
                 </div>
+                <div className="flex flex-col gap-8 px-8 py-4 rounded-2xl bg-secondary/50">
+                  <div className="flex flex-col w-full gap-2">
+                    <span className="text-lg md:text-xl font-bold tracking-tighter">
+                      Public Key
+                    </span>
+                    <p
+                      onClick={() =>
+                        copyToClipboard(wallet.publicKey, "Public key")
+                      }
+                      className="text-primary/80 font-medium cursor-pointer hover:text-primary transition-all duration-300 truncate"
+                    >
+                      {wallet.publicKey}
+                    </p>
+                  </div>
+                  <div className="flex flex-col w-full gap-2">
+                    <span className="text-lg md:text-xl font-bold tracking-tighter">
+                      Private Key
+                    </span>
+                    <div className="flex justify-between w-full items-center gap-2">
+                      <p
+                        onClick={() =>
+                          visiblePrivateKeys[index] &&
+                          copyToClipboard(wallet.privateKey, "Private key")
+                        }
+                        className={`text-primary/80 font-medium ${
+                          visiblePrivateKeys[index]
+                            ? "cursor-pointer hover:text-primary"
+                            : ""
+                        } transition-all duration-300 truncate`}
+                      >
+                        {visiblePrivateKeys[index]
+                          ? wallet.privateKey
+                          : "•".repeat(64)}
+                      </p>
+                      <Button
+                        variant="ghost"
+                        onClick={() => togglePrivateKeyVisibility(index)}
+                      >
+                        {visiblePrivateKeys[index] ? (
+                          <EyeOff className="size-4" />
+                        ) : (
+                          <Eye className="size-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            ))
+          )}
         </div>
       </div>
     </div>
