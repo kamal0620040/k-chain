@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BlockchainTypeSelector } from "@/components/blockchain-type-selector/BlockchainTypeSelector";
 import type { BlockchainType } from "@/types/blockchain-type";
 import { SecretRecoveryPhrase } from "@/components/secret-recovery-phrase/SecretRecoveryPhrase";
@@ -17,13 +17,8 @@ import { Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 import { ethers } from "ethers";
 import { toast } from "sonner";
-
-interface Wallet {
-  publicKey: string;
-  privateKey: string;
-  mnemonic: string;
-  path: string;
-}
+import { storage } from "@/lib/storage";
+import type { Wallet } from "@/lib/storage";
 
 export const GenerateWallet = () => {
   const [selectedBlockchain, setSelectedBlockchain] = useState<
@@ -34,6 +29,36 @@ export const GenerateWallet = () => {
   const [visiblePrivateKeys, setVisiblePrivateKeys] = useState<{
     [key: number]: boolean;
   }>({});
+
+  // Load data from localStorage on mount
+  useEffect(() => {
+    const loadedBlockchain = storage.loadBlockchain();
+    const loadedMnemonic = storage.loadMnemonic();
+    const loadedWallets = storage.loadWallets();
+
+    if (loadedBlockchain) setSelectedBlockchain(loadedBlockchain);
+    if (loadedMnemonic) setMnemonic(loadedMnemonic);
+    if (loadedWallets.length > 0) setWallets(loadedWallets);
+  }, []);
+
+  // Save blockchain to localStorage when it changes
+  useEffect(() => {
+    if (selectedBlockchain) {
+      storage.saveBlockchain(selectedBlockchain);
+    }
+  }, [selectedBlockchain]);
+
+  // Save mnemonic to localStorage when it changes
+  useEffect(() => {
+    if (mnemonic) {
+      storage.saveMnemonic(mnemonic);
+    }
+  }, [mnemonic]);
+
+  // Save wallets to localStorage when they change
+  useEffect(() => {
+    storage.saveWallets(wallets);
+  }, [wallets]);
 
   const handleSelectBlockchain = (blockchain: BlockchainType) => {
     setSelectedBlockchain(blockchain);
@@ -114,7 +139,23 @@ export const GenerateWallet = () => {
   const handleRemoveAllWallets = () => {
     setWallets([]);
     setVisiblePrivateKeys({});
+    storage.clearWallets();
     toast.success("All wallets removed successfully!");
+  };
+
+  const handleClearAllData = () => {
+    if (
+      window.confirm(
+        "⚠️ This will permanently delete all your wallets, mnemonic, and settings. Are you sure?"
+      )
+    ) {
+      setWallets([]);
+      setMnemonic("");
+      setSelectedBlockchain("");
+      setVisiblePrivateKeys({});
+      storage.clearAll();
+      toast.success("All data cleared successfully!");
+    }
   };
 
   const togglePrivateKeyVisibility = (index: number) => {
@@ -176,18 +217,29 @@ export const GenerateWallet = () => {
       </div>
 
       <div className="mt-10">
-        <div className="flex items-center justify-between">
-          <div className="text-2xl font-extrabold">
-            {selectedBlockchain.toUpperCase()} Wallet
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div className="text-2xl font-extrabold">
+              {selectedBlockchain.toUpperCase()} Wallet
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={handleAddWallet}>Add Wallet</Button>
+              <Button
+                variant="destructive"
+                onClick={handleRemoveAllWallets}
+                disabled={wallets.length === 0}
+              >
+                Remove All Wallets
+              </Button>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button onClick={handleAddWallet}>Add Wallet</Button>
+          <div className="flex justify-end">
             <Button
-              className="bg-red-700 text-white hover:bg-red-800"
-              onClick={handleRemoveAllWallets}
-              disabled={wallets.length === 0}
+              variant="outline"
+              className="text-destructive border-destructive hover:bg-destructive hover:text-white"
+              onClick={handleClearAllData}
             >
-              Remove All Wallets
+              Clear All Data
             </Button>
           </div>
         </div>
